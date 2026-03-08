@@ -85,41 +85,38 @@ public class ExplosionStaffItem extends Item {
 
         Vec3 pos = player.position();
 
-        // ── LOOK DIRECTION BASIS VECTORS ─────────────────────────────────────
+        // Look direction — used to find the target point ahead of the player
         Vec3 look = player.getLookAngle().normalize();
-        Vec3 worldUp = new Vec3(0, 1, 0);
-        Vec3 right = look.cross(worldUp).normalize();
-        if (right.lengthSqr() < 0.001) right = new Vec3(1, 0, 0);
-        Vec3 up = right.cross(look).normalize();
 
-        // ── SKY RINGS — concentric halos at the target point ─────────────────
-        // Like the image: multiple rings of different sizes, all centered at same point
+        // ── SKY RINGS — horizontal halos floating ABOVE the target point ─────
+        // The rings are flat (parallel to the ground), hovering above where the
+        // explosion will land — like the anime halos seen from below/the side
         double skyDist = 6.0 + progress * 10.0;
-        Vec3 skyCenter = pos.add(0, 1.5, 0).add(look.scale(skyDist));
+        Vec3 target = pos.add(0, 1.0, 0).add(look.scale(skyDist));
 
-        // 5 concentric rings, max radius grows with charge progress
+        // Rings hover above the target, rising higher as charge builds
+        double baseHeight = target.y + 1.5 + progress * 3.0;
+
+        // 5 horizontal concentric rings — all flat (XZ plane), stacked slightly
         double maxR = 1.0 + progress * 5.5;
         double[] ringScale = {1.0, 0.75, 0.55, 0.38, 0.22};
         double[] ringSpeed = {1.0, -1.3, 1.6, -2.0, 2.5}; // alternating rotations
+        double[] heightOffset = {0, 0.4, 0.8, 1.1, 1.3};  // slightly stacked
 
         for (int r = 0; r < ringScale.length; r++) {
             double radius = maxR * ringScale[r];
             if (radius < 0.3) continue; // skip tiny rings early in charge
             double ringRot = rot * ringSpeed[r];
-            int points = Math.max(24, (int)(radius * 10)); // denser for bigger rings
+            double ringY = baseHeight + heightOffset[r];
+            int points = Math.max(24, (int)(radius * 10));
 
             for (int i = 0; i < points; i++) {
                 double a = (i / (double) points) * Math.PI * 2 + ringRot;
-                // Draw two parallel rings slightly offset for a thick, glowing look
-                for (double offset : new double[]{0, 0.12}) {
-                    double rad = radius + offset;
-                    Vec3 point = skyCenter
-                        .add(right.scale(Math.cos(a) * rad))
-                        .add(up.scale(Math.sin(a) * rad));
-                    level.addParticle(
-                        offset == 0 ? ParticleTypes.FLAME : ParticleTypes.END_ROD,
-                        point.x, point.y, point.z, 0, 0, 0);
-                }
+                // Flat ring in the XZ plane — horizontal halo
+                double rx = target.x + Math.cos(a) * radius;
+                double rz = target.z + Math.sin(a) * radius;
+                level.addParticle(ParticleTypes.FLAME,   rx, ringY,        rz, 0, 0, 0);
+                level.addParticle(ParticleTypes.END_ROD, rx, ringY + 0.12, rz, 0, 0, 0);
             }
         }
 
