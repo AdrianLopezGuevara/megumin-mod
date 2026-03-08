@@ -1,0 +1,11 @@
+{
+  "explosion_chant": {
+    "category": "player",
+    "sounds": [
+      {
+        "name": "megumin:explosion_chant",
+        "stream": false
+      }
+    ]
+  }
+}
