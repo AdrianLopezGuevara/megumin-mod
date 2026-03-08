@@ -77,77 +77,107 @@ public class ExplosionStaffItem extends Item {
         if (!level.isClientSide) return;
 
         int usedTicks = CHARGE_TICKS - remainingUseDuration;
-        float progress = usedTicks / (float) CHARGE_TICKS;
-        double rot = usedTicks * 0.08; // rotation speed (radians/tick)
+        // Don't show effect until 1 second in — let player see their target first
+        if (usedTicks < 20) return;
+
+        float progress = (usedTicks - 20) / (float)(CHARGE_TICKS - 20);
+        double rot = usedTicks * 0.05;
 
         Vec3 pos = player.position();
 
-        // ── GROUND CIRCLES (sparse — won't block the target view) ───────────
-        // Only spawn every 3 ticks to keep density low
-        if (usedTicks % 3 == 0) {
-            double outerR = 2.5 + progress * 2.5;
-            // Outer ring: just 12 dots instead of 40
-            for (int i = 0; i < 12; i++) {
-                double a = (i / 12.0) * Math.PI * 2 + rot;
-                level.addParticle(ParticleTypes.FLAME,
-                    pos.x + Math.cos(a) * outerR, pos.y + 0.1, pos.z + Math.sin(a) * outerR,
-                    0, 0.01, 0);
-            }
-
-            // Inner ring: 8 END_ROD dots (less obstructive than LAVA)
-            double innerR = outerR * 0.5;
-            for (int i = 0; i < 8; i++) {
-                double a = (i / 8.0) * Math.PI * 2 - rot;
-                level.addParticle(ParticleTypes.END_ROD,
-                    pos.x + Math.cos(a) * innerR, pos.y + 0.1, pos.z + Math.sin(a) * innerR,
-                    0, 0.005, 0);
-            }
-        }
-
-        // ── VERTICAL CIRCLE (perpendicular to look — like the anime) ────────
+        // ── LOOK DIRECTION BASIS VECTORS ─────────────────────────────────────
         Vec3 look = player.getLookAngle().normalize();
-
-        // Find right and up vectors perpendicular to look direction
         Vec3 worldUp = new Vec3(0, 1, 0);
         Vec3 right = look.cross(worldUp).normalize();
-        if (right.lengthSqr() < 0.001) right = new Vec3(1, 0, 0); // edge case: looking straight up/down
+        if (right.lengthSqr() < 0.001) right = new Vec3(1, 0, 0);
         Vec3 up = right.cross(look).normalize();
 
-        // Circle center grows further as charge builds
-        double dist = 4.0 + progress * 4.0;
-        Vec3 center = pos.add(0, 1, 0).add(look.scale(dist));
-        double circleR = 1.5 + progress * 2.5;
+        // ── SKY RINGS — concentric halos at the target point ─────────────────
+        // Like the image: multiple rings of different sizes, all centered at same point
+        double skyDist = 6.0 + progress * 10.0;
+        Vec3 skyCenter = pos.add(0, 1.5, 0).add(look.scale(skyDist));
 
-        // Outer vertical ring — FLAME
-        for (int i = 0; i < 36; i++) {
-            double a = (i / 36.0) * Math.PI * 2 + rot * 2;
-            Vec3 point = center
-                .add(right.scale(Math.cos(a) * circleR))
-                .add(up.scale(Math.sin(a) * circleR));
-            level.addParticle(ParticleTypes.FLAME, point.x, point.y, point.z, 0, 0.01, 0);
-        }
+        // 5 concentric rings, max radius grows with charge progress
+        double maxR = 1.0 + progress * 5.5;
+        double[] ringScale = {1.0, 0.75, 0.55, 0.38, 0.22};
+        double[] ringSpeed = {1.0, -1.3, 1.6, -2.0, 2.5}; // alternating rotations
 
-        // Inner vertical ring — END_ROD (white glow), counter-rotating
-        double innerCircleR = circleR * 0.55;
-        for (int i = 0; i < 24; i++) {
-            double a = (i / 24.0) * Math.PI * 2 - rot * 3;
-            Vec3 point = center
-                .add(right.scale(Math.cos(a) * innerCircleR))
-                .add(up.scale(Math.sin(a) * innerCircleR));
-            level.addParticle(ParticleTypes.END_ROD, point.x, point.y, point.z, 0, 0, 0);
-        }
+        for (int r = 0; r < ringScale.length; r++) {
+            double radius = maxR * ringScale[r];
+            if (radius < 0.3) continue; // skip tiny rings early in charge
+            double ringRot = rot * ringSpeed[r];
+            int points = Math.max(24, (int)(radius * 10)); // denser for bigger rings
 
-        // ── RISING ENERGY STREAMS from player toward the circle ─────────────
-        if (usedTicks % 2 == 0) {
-            for (int i = 0; i < 4; i++) {
-                double a = rot * 3 + i * (Math.PI / 2);
-                double r = 0.6;
-                Vec3 src = pos.add(Math.cos(a) * r, 1.2, Math.sin(a) * r);
-                Vec3 dir = center.subtract(src).normalize().scale(0.15);
-                level.addParticle(ParticleTypes.FLAME,
-                    src.x, src.y, src.z,
-                    dir.x, dir.y + 0.05, dir.z);
+            for (int i = 0; i < points; i++) {
+                double a = (i / (double) points) * Math.PI * 2 + ringRot;
+                // Draw two parallel rings slightly offset for a thick, glowing look
+                for (double offset : new double[]{0, 0.12}) {
+                    double rad = radius + offset;
+                    Vec3 point = skyCenter
+                        .add(right.scale(Math.cos(a) * rad))
+                        .add(up.scale(Math.sin(a) * rad));
+                    level.addParticle(
+                        offset == 0 ? ParticleTypes.FLAME : ParticleTypes.END_ROD,
+                        point.x, point.y, point.z, 0, 0, 0);
+                }
             }
+        }
+
+        // ── GROUND MAGIC CIRCLE — geometric rune style ───────────────────────
+        // Only every 2 ticks to keep it from overpowering
+        if (usedTicks % 2 == 0) {
+            double outerR = 3.5 + progress * 1.5;
+            double y = pos.y + 0.05;
+
+            // Outer crisp circle
+            int outerPoints = 48;
+            for (int i = 0; i < outerPoints; i++) {
+                double a = (i / (double) outerPoints) * Math.PI * 2 + rot * 0.3;
+                level.addParticle(ParticleTypes.END_ROD,
+                    pos.x + Math.cos(a) * outerR, y, pos.z + Math.sin(a) * outerR, 0, 0, 0);
+            }
+
+            // Inner circle (counter-rotating)
+            double innerR = outerR * 0.6;
+            for (int i = 0; i < 36; i++) {
+                double a = (i / 36.0) * Math.PI * 2 - rot * 0.5;
+                level.addParticle(ParticleTypes.END_ROD,
+                    pos.x + Math.cos(a) * innerR, y, pos.z + Math.sin(a) * innerR, 0, 0, 0);
+            }
+
+            // Pentagon inscribed (crisp lines between vertices)
+            double pentR = outerR * 0.75;
+            for (int i = 0; i < 5; i++) {
+                double a1 = (i / 5.0) * Math.PI * 2 - rot * 0.2;
+                double a2 = ((i + 1) / 5.0) * Math.PI * 2 - rot * 0.2;
+                drawLine(level,
+                    pos.x + Math.cos(a1) * pentR, y, pos.z + Math.sin(a1) * pentR,
+                    pos.x + Math.cos(a2) * pentR, y, pos.z + Math.sin(a2) * pentR,
+                    12, ParticleTypes.FLAME);
+            }
+
+            // Pentagram star (skip-one vertices = star pattern)
+            double starR = outerR * 0.45;
+            for (int i = 0; i < 5; i++) {
+                double a1 = (i / 5.0) * Math.PI * 2 + rot * 0.4;
+                double a2 = ((i + 2) / 5.0) * Math.PI * 2 + rot * 0.4;
+                drawLine(level,
+                    pos.x + Math.cos(a1) * starR, y, pos.z + Math.sin(a1) * starR,
+                    pos.x + Math.cos(a2) * starR, y, pos.z + Math.sin(a2) * starR,
+                    10, ParticleTypes.FLAME);
+            }
+        }
+    }
+
+    /** Draws a line of particles between two points */
+    private void drawLine(Level level, double x1, double y1, double z1,
+                          double x2, double y2, double z2,
+                          int steps, net.minecraft.core.particles.SimpleParticleType type) {
+        for (int s = 0; s <= steps; s++) {
+            double t = s / (double) steps;
+            level.addParticle(type,
+                x1 + t * (x2 - x1), y1 + t * (y2 - y1), z1 + t * (z2 - z1),
+                0, 0, 0);
         }
     }
 
