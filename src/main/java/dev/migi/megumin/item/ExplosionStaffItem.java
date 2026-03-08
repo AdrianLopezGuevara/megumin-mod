@@ -52,6 +52,12 @@ public class ExplosionStaffItem extends Item {
         // Lock the item for full audio duration to prevent spam
         if (!level.isClientSide) {
             player.getCooldowns().addCooldown(this, AUDIO_COOLDOWN_TICKS);
+
+            // Darkness effect during the entire charge — sky goes dark like the anime
+            player.addEffect(new MobEffectInstance(
+                net.minecraft.world.effect.MobEffects.DARKNESS,
+                CHARGE_TICKS + 20, 1, false, false, false
+            ));
         }
 
         // Play Megumin's chant — null = everyone including caster hears it
@@ -76,32 +82,26 @@ public class ExplosionStaffItem extends Item {
 
         Vec3 pos = player.position();
 
-        // ── GROUND CIRCLES ──────────────────────────────────────────────────
-        // Outer ring — expands and rotates clockwise
-        double outerR = 2.5 + progress * 2.5;
-        for (int i = 0; i < 40; i++) {
-            double a = (i / 40.0) * Math.PI * 2 + rot;
-            level.addParticle(ParticleTypes.FLAME,
-                pos.x + Math.cos(a) * outerR, pos.y + 0.1, pos.z + Math.sin(a) * outerR,
-                0, 0.02, 0);
-        }
+        // ── GROUND CIRCLES (sparse — won't block the target view) ───────────
+        // Only spawn every 3 ticks to keep density low
+        if (usedTicks % 3 == 0) {
+            double outerR = 2.5 + progress * 2.5;
+            // Outer ring: just 12 dots instead of 40
+            for (int i = 0; i < 12; i++) {
+                double a = (i / 12.0) * Math.PI * 2 + rot;
+                level.addParticle(ParticleTypes.FLAME,
+                    pos.x + Math.cos(a) * outerR, pos.y + 0.1, pos.z + Math.sin(a) * outerR,
+                    0, 0.01, 0);
+            }
 
-        // Inner ring — counter-rotates
-        double innerR = outerR * 0.5;
-        for (int i = 0; i < 24; i++) {
-            double a = (i / 24.0) * Math.PI * 2 - rot;
-            level.addParticle(ParticleTypes.LAVA,
-                pos.x + Math.cos(a) * innerR, pos.y + 0.05, pos.z + Math.sin(a) * innerR,
-                0, 0, 0);
-        }
-
-        // Tiny center ring
-        double tinyR = innerR * 0.4;
-        for (int i = 0; i < 12; i++) {
-            double a = (i / 12.0) * Math.PI * 2 + rot * 2;
-            level.addParticle(ParticleTypes.END_ROD,
-                pos.x + Math.cos(a) * tinyR, pos.y + 0.15, pos.z + Math.sin(a) * tinyR,
-                0, 0.01, 0);
+            // Inner ring: 8 END_ROD dots (less obstructive than LAVA)
+            double innerR = outerR * 0.5;
+            for (int i = 0; i < 8; i++) {
+                double a = (i / 8.0) * Math.PI * 2 - rot;
+                level.addParticle(ParticleTypes.END_ROD,
+                    pos.x + Math.cos(a) * innerR, pos.y + 0.1, pos.z + Math.sin(a) * innerR,
+                    0, 0.005, 0);
+            }
         }
 
         // ── VERTICAL CIRCLE (perpendicular to look — like the anime) ────────
@@ -162,6 +162,9 @@ public class ExplosionStaffItem extends Item {
                 SoundSource.PLAYERS
             ));
 
+            // Remove darkness effect — world returns to normal
+            player.removeEffect(net.minecraft.world.effect.MobEffects.DARKNESS);
+
             // Short penalty cooldown (3 seconds) for interrupting
             player.getCooldowns().addCooldown(this, 60);
 
@@ -189,9 +192,20 @@ public class ExplosionStaffItem extends Item {
         serverLevel.sendParticles(ParticleTypes.FLAME,            target.x, target.y, target.z, 100, 3, 3, 3, 0.5);
         serverLevel.sendParticles(ParticleTypes.LARGE_SMOKE,      target.x, target.y, target.z, 50, 2, 2, 2, 0.2);
 
+        // Visual-only lightning bolt at explosion point (cosmetic, no damage)
+        net.minecraft.world.entity.LightningBolt lightning =
+            new net.minecraft.world.entity.LightningBolt(
+                net.minecraft.world.entity.EntityType.LIGHTNING_BOLT, serverLevel);
+        lightning.moveTo(target.x, target.y, target.z);
+        lightning.setVisualOnly(true);
+        serverLevel.addFreshEntity(lightning);
+
         // Boom sound
         level.playSound(null, player.blockPosition(),
             SoundEvents.GENERIC_EXPLODE.value(), SoundSource.PLAYERS, 5.0f, 0.8f);
+
+        // Remove darkness — world snaps back to normal after the explosion
+        player.removeEffect(net.minecraft.world.effect.MobEffects.DARKNESS);
 
         // === MEGUMIN COLLAPSES ===
         player.addEffect(new MobEffectInstance(ModEffects.EXPLOSION_EXHAUSTION, 200, 1, false, true, true));
